@@ -54,7 +54,71 @@ fast.
 
 Secrets never live in the repo. Locally use env vars; hosted, use repo Secrets.
 
-## Hosting
+## Telegram push (recommended)
+
+Daily push of today's picks **and** yesterday's accuracy, straight to your
+phone — no SMTP/deliverability hassle.
+
+1. Create a bot via [@BotFather](https://t.me/BotFather), copy the token.
+2. DM your new bot anything once.
+3. Visit `https://api.telegram.org/bot<TOKEN>/getUpdates` and read your
+   `chat.id` from the JSON.
+4. Put both in `.env`:
+
+   ```
+   TELEGRAM_BOT_TOKEN=...
+   TELEGRAM_CHAT_ID=...
+   ```
+
+`main.py` pushes to Telegram whenever these are set (alongside email if SMTP is
+also configured). Either channel alone is enough; with neither, a plain run
+errors (use `--dry-run` to preview).
+
+## Web dashboard
+
+A live Flask dashboard renders the same data in the browser: one card per
+match, win/draw/win probability bars, the model scoreline, over/under, and a
+yesterday-accuracy panel.
+
+```bash
+.venv/bin/python webapp.py          # dev server on http://localhost:8000
+```
+
+Routes: `/` (today), `/day/<YYYY-MM-DD>`, `/api/day/<YYYY-MM-DD>` (JSON),
+`/healthz`. Data is fetched live per request (no cache).
+
+## Docker + VPS deploy (worldcup.botcloud.pro)
+
+```bash
+cp .env.example .env        # fill in TELEGRAM_* (and SMTP_* if you want email)
+docker compose up -d --build
+```
+
+The container runs gunicorn on `127.0.0.1:8000` (localhost-only; nginx fronts
+it). `predictions.jsonl` persists in the `./data` volume.
+
+**nginx + TLS** (existing nginx on the host; does NOT touch `coda-defense.com`):
+
+```bash
+# DNS first: A record  worldcup.botcloud.pro -> <VPS IP>
+sudo cp deploy/worldcup.botcloud.pro.nginx /etc/nginx/sites-available/worldcup.botcloud.pro
+sudo ln -s /etc/nginx/sites-available/worldcup.botcloud.pro /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d worldcup.botcloud.pro
+```
+
+**Daily job** (host crontab, 15:00 Israel time, DST-safe):
+
+```cron
+CRON_TZ=Asia/Jerusalem
+0 15 * * * docker exec worldcup-app sh -c 'python main.py --score "$(date -u -d yesterday +%F)" ; python main.py' >> /var/log/worldcup.log 2>&1
+```
+
+The job scores yesterday (Telegram push), then builds today (records to the
+volume + Telegram push). The dashboard stays live and stateless; the job is
+what persists predictions for next-day scoring.
+
+## Hosting (alternative: GitHub Actions)
 
 `.github/workflows/daily.yml` runs a daily GitHub Actions cron: it scores
 yesterday, emails today, and commits the `predictions.jsonl` log so scoring
@@ -68,9 +132,15 @@ persists across runs. Set the same SMTP vars as repo Secrets.
 | `schedule_source.py` | `Match` + `ScheduleSource` interface + `OpenFootballSource`. Swap providers here. |
 | `polymarket.py` | Gamma API client: `find_market(team1, team2)` → `MarketSnapshot`. |
 | `predict.py` | Pure-stdlib Poisson model: `build_prediction(...)` → `Prediction`. |
-| `notify.py` | `render_digest()` (text + HTML) and `send_email()` (SMTP/SSL). |
+| `notify.py` | `render_digest()`, `send_email()` (SMTP/SSL), `send_telegram()`. |
 | `store.py` | Append predictions to `predictions.jsonl`, score vs results. |
-| `main.py` | Orchestration + CLI. |
+| `core.py` | `build_items(date)` — shared orchestration (CLI + web + job). |
+| `main.py` | Orchestration + CLI (digest, scoring, Telegram/email push). |
+| `webapp.py` | Flask dashboard (live per-request). |
+| `templates/`, `static/` | Dashboard HTML + CSS. |
+| `Dockerfile`, `docker-compose.yml` | Container + VPS deploy. |
+| `deploy/` | nginx server block for `worldcup.botcloud.pro`. |
+| `tests/` | Offline test suite (`python -m unittest discover -s tests`). |
 
 The schedule source stays behind `ScheduleSource` so a paid provider
 (worldcupapi.com, stable match_ids) can be dropped in without downstream change.

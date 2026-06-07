@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    container_name: worldcup-app
+    restart: unless-stopped
+    # Bind to localhost only — nginx on the host fronts it with TLS.
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Persist the predictions log so next-day scoring works across restarts.
+      - ./data:/app/data

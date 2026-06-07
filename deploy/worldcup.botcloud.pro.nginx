@@ -1,0 +1,27 @@
+# nginx server block for worldcup.botcloud.pro
+#
+# Install:
+#   sudo cp deploy/worldcup.botcloud.pro.nginx /etc/nginx/sites-available/worldcup.botcloud.pro
+#   sudo ln -s /etc/nginx/sites-available/worldcup.botcloud.pro /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Then issue the TLS cert (certbot rewrites this file to add the 443 block):
+#   sudo certbot --nginx -d worldcup.botcloud.pro
+#
+# DNS: add an A record  worldcup.botcloud.pro -> <VPS IP>  before running certbot.
+# This file is self-contained and does NOT touch any other site (e.g. coda-defense.com).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name worldcup.botcloud.pro;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 65s;
+    }
+}

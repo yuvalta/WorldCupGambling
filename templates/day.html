@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Cup picks — {{ date }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <h1>⚽ World Cup picks</h1>
+    <nav class="datenav">
+      <a class="navbtn" href="{{ url_for('day_view', date=prev) }}">← {{ prev }}</a>
+      <span class="curdate">{{ date }}</span>
+      <a class="navbtn" href="{{ url_for('day_view', date=next) }}">{{ next }} →</a>
+    </nav>
+  </header>
+
+  <main>
+    {% if error %}
+      <div class="banner err">{{ error }}</div>
+    {% endif %}
+
+    {% if not items %}
+      <div class="banner muted">No World Cup matches scheduled for {{ date }}.</div>
+    {% endif %}
+
+    <section class="cards">
+      {% for m in items %}
+      <article class="card">
+        <div class="card-head">
+          <span class="teams">{{ m.team1 }} <span class="vs">vs</span> {{ m.team2 }}</span>
+          {% if m.group %}<span class="tag">Group {{ m.group }}</span>{% endif %}
+          {% if m.round %}<span class="tag">{{ m.round }}</span>{% endif %}
+        </div>
+
+        {% if not m.has_pred %}
+          <div class="nopred">{{ m.note or 'no live market found' }}</div>
+        {% else %}
+          <div class="score-badge">
+            <span class="sb-team">{{ m.team1 }}</span>
+            <span class="sb-score">{{ m.score1 }}–{{ m.score2 }}</span>
+            <span class="sb-team">{{ m.team2 }}</span>
+          </div>
+          <div class="xg">model xG {{ m.lambda1 }} – {{ m.lambda2 }}</div>
+
+          <div class="bar" role="img"
+               aria-label="{{ m.team1 }} {{ m.p1 }}%, draw {{ m.draw }}%, {{ m.team2 }} {{ m.p2 }}%">
+            <span class="seg s1" style="width: {{ m.p1 }}%"></span>
+            <span class="seg sd" style="width: {{ m.draw }}%"></span>
+            <span class="seg s2" style="width: {{ m.p2 }}%"></span>
+          </div>
+          <div class="legend">
+            <span><i class="dot s1"></i>{{ m.team1 }} {{ m.p1 }}%</span>
+            <span><i class="dot sd"></i>Draw {{ m.draw }}%</span>
+            <span><i class="dot s2"></i>{{ m.team2 }} {{ m.p2 }}%</span>
+          </div>
+
+          {% if m.totals %}
+          <div class="totals">
+            Goals O/U {{ m.totals.line }}:
+            over {{ m.totals.over }}% · under {{ m.totals.under }}%
+          </div>
+          {% endif %}
+        {% endif %}
+      </article>
+      {% endfor %}
+    </section>
+
+    {% if accuracy %}
+    <section class="accuracy">
+      <h2>Yesterday's accuracy — {{ accuracy.date }}</h2>
+      <div class="acc-summary">
+        Exact scorelines <b>{{ accuracy.exact }}/{{ accuracy.total }}</b> ·
+        Correct outcomes <b>{{ accuracy.outcomes }}/{{ accuracy.total }}</b>
+      </div>
+      <ul class="acc-list">
+        {% for p in accuracy.picks %}
+        <li class="{{ 'exact' if p.exact else ('ok' if p.outcome_correct else 'miss') }}">
+          <span>{{ p.label }}</span>
+          <span class="acc-nums">pred {{ p.predicted }} · actual {{ p.actual }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </main>
+
+  <footer>
+    Probabilities are Polymarket's crowd-implied odds (real market data).
+    The scoreline is our own independent-Poisson model fitted to those odds —
+    <b>not</b> a Polymarket prediction.
+  </footer>
+</body>
+</html>

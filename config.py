@@ -50,7 +50,12 @@ HTTP_TIMEOUT = _env_int("HTTP_TIMEOUT", 20)
 USER_AGENT = _env("USER_AGENT", "wc-gambling-emailer/1.0 (+stdlib+requests)")
 
 # --- Storage ---------------------------------------------------------------
-PREDICTIONS_PATH = _env("PREDICTIONS_PATH", "predictions.jsonl")
+# Defaults under data/ so a Docker volume can persist it across container runs.
+PREDICTIONS_PATH = _env("PREDICTIONS_PATH", "data/predictions.jsonl")
+
+# --- Web app ---------------------------------------------------------------
+WEB_HOST = _env("WEB_HOST", "0.0.0.0")
+WEB_PORT = _env_int("WEB_PORT", 8000)
 
 
 @dataclass(frozen=True)
@@ -77,4 +82,23 @@ def load_email_config() -> EmailConfig:
         password=_env("SMTP_PASSWORD"),
         sender=_env("EMAIL_FROM") or _env("SMTP_USER"),
         recipient=_env("EMAIL_TO"),
+    )
+
+
+@dataclass(frozen=True)
+class TelegramConfig:
+    """Telegram Bot API settings, from env. `configured` gates real sends."""
+
+    token: str
+    chat_id: str
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.token and self.chat_id)
+
+
+def load_telegram_config() -> TelegramConfig:
+    return TelegramConfig(
+        token=_env("TELEGRAM_BOT_TOKEN"),
+        chat_id=_env("TELEGRAM_CHAT_ID"),
     )

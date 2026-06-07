@@ -14,7 +14,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Optional
 
-from config import EmailConfig
+import requests
+
+import config
+from config import EmailConfig, TelegramConfig
 from predict import Prediction
 from schedule_source import Match
 
@@ -137,3 +140,23 @@ def send_email(cfg: EmailConfig, subject: str, text_body: str, html_body: str) -
     with smtplib.SMTP_SSL(cfg.host, cfg.port, context=context, timeout=30) as server:
         server.login(cfg.user, cfg.password)
         server.sendmail(cfg.sender, [cfg.recipient], msg.as_string())
+
+
+def send_telegram(cfg: TelegramConfig, text: str) -> None:
+    """Push a plain-text message via the Telegram Bot API.
+
+    Plain text only (no parse_mode) so team names with special characters can't
+    break Markdown/HTML parsing. Raises if not configured — gate on
+    `cfg.configured`.
+    """
+    if not cfg.configured:
+        raise RuntimeError("Telegram not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+
+    url = f"https://api.telegram.org/bot{cfg.token}/sendMessage"
+    resp = requests.post(
+        url,
+        json={"chat_id": cfg.chat_id, "text": text, "disable_web_page_preview": True},
+        timeout=config.HTTP_TIMEOUT,
+        headers={"User-Agent": config.USER_AGENT},
+    )
+    resp.raise_for_status()
