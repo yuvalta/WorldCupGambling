@@ -40,6 +40,19 @@ class Match:
     def finished(self) -> bool:
         return self.score1 is not None and self.score2 is not None
 
+    @property
+    def group_label(self) -> str:
+        """Display label for the group, e.g. "Group B".
+
+        openfootball's `group` field may already contain the word "Group"
+        (e.g. "Group B") or just the letter ("B"). Normalise so callers never
+        double the prefix. Empty for knockout fixtures.
+        """
+        g = self.group.strip()
+        if not g:
+            return ""
+        return g if g.lower().startswith("group") else f"Group {g}"
+
     def label(self) -> str:
         return f"{self.team1} vs {self.team2}"
 

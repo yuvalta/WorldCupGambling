@@ -43,7 +43,7 @@ def _item_view(item: DigestItem) -> dict:
     base = {
         "team1": m.team1,
         "team2": m.team2,
-        "group": m.group,
+        "group": m.group_label,
         "round": m.round,
         "has_pred": item.prediction is not None,
         "note": item.note,

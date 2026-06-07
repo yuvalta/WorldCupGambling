@@ -44,8 +44,8 @@ def _pct(x: float) -> str:
 def _item_text(item: DigestItem) -> str:
     m = item.match
     head = f"{m.team1} vs {m.team2}"
-    if m.group:
-        head += f"  (Group {m.group})"
+    if m.group_label:
+        head += f"  ({m.group_label})"
     if item.prediction is None:
         return f"{head}\n    {item.note or 'no live market found'}"
     p = item.prediction
@@ -66,7 +66,7 @@ def _item_text(item: DigestItem) -> str:
 def _item_html(item: DigestItem) -> str:
     m = item.match
     head = f"{m.team1} vs {m.team2}"
-    grp = f' <span style="color:#888">(Group {m.group})</span>' if m.group else ""
+    grp = f' <span style="color:#888">({m.group_label})</span>' if m.group_label else ""
     if item.prediction is None:
         return (
             f'<div style="margin:0 0 16px"><strong>{head}</strong>{grp}'
