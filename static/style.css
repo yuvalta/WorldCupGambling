@@ -54,6 +54,11 @@ main { max-width: 920px; margin: 0 auto; padding: 24px; }
 }
 .banner.err { border-color: var(--t2); color: #ffb3b3; }
 .banner.muted { color: var(--muted); }
+.banner.demo {
+  border-color: var(--t1);
+  background: linear-gradient(180deg, rgba(79,157,255,.12), var(--panel));
+  color: #cfe2ff;
+}
 
 .cards {
   display: grid;

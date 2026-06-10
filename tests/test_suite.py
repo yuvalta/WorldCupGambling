@@ -137,6 +137,12 @@ class TestWebapp(unittest.TestCase):
             self.assertIn(b"Brazil", r.data)
             self.assertIn(b"Polymarket", r.data)  # honesty footer
 
+    def test_demo_renders(self):
+        r = self.client.get("/demo")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Demo", r.data)
+        self.assertIn(b"Brazil", r.data)
+
     def test_api_json(self):
         m = Match(date="2026-06-15", team1="USA", team2="Wales")
         items = core.build_items(

@@ -10,13 +10,20 @@
   <header class="top">
     <h1>⚽ World Cup picks</h1>
     <nav class="datenav">
-      <a class="navbtn" href="{{ url_for('day_view', date=prev) }}">← {{ prev }}</a>
+      <a class="navbtn" href="{{ prev_url }}">← {{ prev_label }}</a>
       <span class="curdate">{{ date }}</span>
-      <a class="navbtn" href="{{ url_for('day_view', date=next) }}">{{ next }} →</a>
+      <a class="navbtn" href="{{ next_url }}">{{ next_label }} →</a>
     </nav>
   </header>
 
   <main>
+    {% if demo %}
+      <div class="banner demo">
+        <b>Demo.</b> Illustrative market odds and sample results to show how it
+        looks. Scorelines are still produced by the real Poisson model. Live
+        data fills in automatically once Polymarket markets open.
+      </div>
+    {% endif %}
     {% if error %}
       <div class="banner err">{{ error }}</div>
     {% endif %}

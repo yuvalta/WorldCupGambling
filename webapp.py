@@ -19,7 +19,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, url_for
 import config
 import core
 from notify import DigestItem
-from schedule_source import OpenFootballSource
+from schedule_source import Match, OpenFootballSource
 from store import score_day
 
 app = Flask(__name__)
@@ -128,11 +128,71 @@ def day_view(date: str):
     return render_template(
         "day.html",
         date=date,
-        prev=_shift(date, -1),
-        next=_shift(date, 1),
+        prev_url=url_for("day_view", date=_shift(date, -1)),
+        next_url=url_for("day_view", date=_shift(date, 1)),
+        prev_label=_shift(date, -1),
+        next_label=_shift(date, 1),
         items=views,
         accuracy=accuracy,
         error=error,
+        demo=False,
+    )
+
+
+def _demo_items() -> List[DigestItem]:
+    """Illustrative fixtures with plausible odds. Scorelines are still produced
+    by the real Poisson model — only the input odds are hand-picked for the demo.
+    """
+    from predict import Totals, build_prediction
+
+    # (team1, team2, group, p1, draw, p2, optional totals)
+    specs = [
+        ("Brazil", "Croatia", "Group C", 0.60, 0.25, 0.15, (2.5, 0.55, 0.45)),
+        ("Argentina", "Mexico", "Group D", 0.52, 0.27, 0.21, None),
+        ("France", "Senegal", "Group E", 0.58, 0.24, 0.18, (2.5, 0.61, 0.39)),
+        ("England", "United States", "Group B", 0.55, 0.26, 0.19, None),
+        ("Spain", "Germany", "Group F", 0.40, 0.28, 0.32, (2.5, 0.58, 0.42)),
+        ("Portugal", "Netherlands", "Group A", 0.38, 0.27, 0.35, None),
+    ]
+    items: List[DigestItem] = []
+    for t1, t2, grp, p1, dr, p2, tot in specs:
+        totals = Totals(*tot) if tot else None
+        m = Match(date="2026-06-15", team1=t1, team2=t2, group=grp)
+        pred = build_prediction(t1, t2, p1, dr, p2, totals=totals)
+        items.append(DigestItem(match=m, prediction=pred))
+    return items
+
+
+def _demo_accuracy() -> dict:
+    return {
+        "date": "matchday 2",
+        "exact": 2,
+        "outcomes": 4,
+        "total": 5,
+        "picks": [
+            {"label": "Japan vs Spain", "predicted": "1–2", "actual": "1–2", "exact": True, "outcome_correct": True},
+            {"label": "Morocco vs Belgium", "predicted": "1–1", "actual": "2–0", "exact": False, "outcome_correct": False},
+            {"label": "Italy vs Canada", "predicted": "2–0", "actual": "2–0", "exact": True, "outcome_correct": True},
+            {"label": "Colombia vs Egypt", "predicted": "1–0", "actual": "3–1", "exact": False, "outcome_correct": True},
+            {"label": "Norway vs Ecuador", "predicted": "1–0", "actual": "1–0", "exact": True, "outcome_correct": True},
+        ],
+    }
+
+
+@app.route("/demo")
+def demo_view():
+    views = [_item_view(it) for it in _demo_items()]
+    return render_template(
+        "day.html",
+        date="Sample matchday",
+        prev_url=url_for("index"),
+        next_url=url_for("index"),
+        prev_label="live",
+        next_label="live",
+        items=views,
+        accuracy=_demo_accuracy(),
+        error=None,
+        demo=True,
     )
 
 
