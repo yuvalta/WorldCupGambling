@@ -133,23 +133,23 @@ class PolymarketClient:
         self._session = session or requests.Session()
 
     def _get_events(self, query: str) -> List[dict]:
-        """Search Gamma events. Returns raw event dicts (each may nest markets)."""
-        params = {
-            "search": query,
-            "closed": "false",
-            "limit": "40",
-        }
+        """Search Gamma events. Returns raw event dicts (each nests markets).
+
+        Uses /public-search, NOT /events?search=. Gamma silently ignores the
+        `search` param on /events and returns an unfiltered 40-event firehose
+        (verified live 2026-06: 'Mexico' and 'Mexico South Africa' both returned
+        the identical generic event list). /public-search honors `q` and returns
+        {"events": [...]} with markets nested, which the parsers expect."""
         resp = self._session.get(
-            f"{self.base}/events",
-            params=params,
+            f"{self.base}/public-search",
+            params={"q": query},
             timeout=config.HTTP_TIMEOUT,
             headers={"User-Agent": config.USER_AGENT},
         )
         resp.raise_for_status()
         data = resp.json()
-        # Gamma may return a bare list or {"data": [...]} depending on endpoint.
         if isinstance(data, dict):
-            return data.get("data", []) or []
+            return data.get("events", []) or data.get("data", []) or []
         return data or []
 
     def _candidate_events(self, team1: str, team2: str) -> List[dict]:
@@ -217,12 +217,16 @@ class PolymarketClient:
             if yes is None:
                 continue
             nq = _norm(q)
-            if any(form in nq for form in _name_forms(team1)):
-                p1 = yes
-            elif any(form in nq for form in _name_forms(team2)):
-                p2 = yes
-            elif "draw" in nq or "tie" in nq:
+            # Check draw FIRST: the draw question is phrased "Will <t1> vs. <t2>
+            # end in a draw?" and therefore CONTAINS both team names — if we test
+            # team1/team2 first it steals the draw market and overwrites p1/p2.
+            # Team markets are "Will <team> win?" so also require "win" to match.
+            if "draw" in nq or "tie" in nq:
                 p_draw = yes
+            elif "win" in nq and any(form in nq for form in _name_forms(team1)):
+                p1 = yes
+            elif "win" in nq and any(form in nq for form in _name_forms(team2)):
+                p2 = yes
             token_ids += _jload(market.get("clobTokenIds")) or []
         if p1 is None or p2 is None:
             return None
