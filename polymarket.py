@@ -27,18 +27,23 @@ import requests
 
 import config
 
-# Map openfootball country names to the spellings/forms Polymarket tends to
-# use. Starter set per handoff — expect to extend on the first live day.
-ALIASES: Dict[str, List[str]] = {
-    "South Korea": ["Korea", "Korea Republic", "Republic of Korea"],
-    "North Korea": ["Korea DPR", "DPR Korea"],
-    "United States": ["USA", "United States", "US", "U.S.A."],
-    "Czech Republic": ["Czechia"],
-    "Ivory Coast": ["Côte d'Ivoire", "Cote d'Ivoire"],
-    "Iran": ["IR Iran"],
-    "Cape Verde": ["Cabo Verde"],
-    "Bosnia and Herzegovina": ["Bosnia", "Bosnia-Herzegovina"],
-}
+# Synonym groups: every spelling the SCHEDULE (openfootball) or POLYMARKET might
+# use for the same country. Bidirectional — a fixture named with any form in a
+# group matches a market named with any other. Polymarket is even inconsistent
+# WITHIN one event (e.g. title "Bosnia-Herzegovina" but question "Bosnia and
+# Herzegovina"), so list all spellings. Avoid ultra-short forms like "US" —
+# they substring-collide ("us" is inside "australia"). Extend as new ones appear.
+SYNONYM_GROUPS: List[List[str]] = [
+    ["South Korea", "Korea", "Korea Republic", "Republic of Korea"],
+    ["North Korea", "Korea DPR", "DPR Korea"],
+    ["United States", "USA", "U.S.A.", "United States of America"],
+    ["Czech Republic", "Czechia"],
+    ["Ivory Coast", "Côte d'Ivoire", "Cote d'Ivoire"],
+    ["Iran", "IR Iran"],
+    ["Cape Verde", "Cabo Verde"],
+    ["Bosnia and Herzegovina", "Bosnia & Herzegovina", "Bosnia-Herzegovina", "Bosnia"],
+    ["Turkey", "Türkiye", "Turkiye"],
+]
 
 
 @dataclass
@@ -78,9 +83,18 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
 
 
+# normalized name -> all normalized forms in its synonym group (built once).
+_FORMS: Dict[str, List[str]] = {}
+for _group in SYNONYM_GROUPS:
+    _normed = [_norm(x) for x in _group if x]
+    for _n in _normed:
+        _FORMS[_n] = _normed
+
+
 def _name_forms(team: str) -> List[str]:
-    forms = [team] + ALIASES.get(team, [])
-    return [_norm(f) for f in forms if f]
+    """All normalized spellings equivalent to `team` (itself if no group)."""
+    n = _norm(team)
+    return _FORMS.get(n, [n])
 
 
 def _title_mentions(title: str, team: str) -> bool:
@@ -128,39 +142,56 @@ def _outcome_prices(market: dict) -> Optional[Dict[str, float]]:
 
 
 class PolymarketClient:
+    # The whole World Cup slate is fetched once via the tag endpoint and cached.
+    # Keyword search can NOT be trusted to surface a fixture: Gamma matches on
+    # Polymarket's OWN spelling, so a schedule name like "South Korea" /
+    # "Czech Republic" never finds the event titled "Korea Republic vs. Czechia"
+    # (and /events?search= is ignored entirely, returning a generic firehose).
+    # Pulling every WC event and matching locally by alias is the only reliable
+    # approach. Verified live 2026-06: tag returns all 64 fixtures.
+    _WC_TAG = "fifa-world-cup"
+
     def __init__(self, base: str = config.GAMMA_BASE, session: Optional[requests.Session] = None):
         self.base = base.rstrip("/")
         self._session = session or requests.Session()
+        self._wc_cache: Optional[List[dict]] = None
 
-    def _get_events(self, query: str) -> List[dict]:
-        """Search Gamma events. Returns raw event dicts (each nests markets).
-
-        Uses /public-search, NOT /events?search=. Gamma silently ignores the
-        `search` param on /events and returns an unfiltered 40-event firehose
-        (verified live 2026-06: 'Mexico' and 'Mexico South Africa' both returned
-        the identical generic event list). /public-search honors `q` and returns
-        {"events": [...]} with markets nested, which the parsers expect."""
-        resp = self._session.get(
-            f"{self.base}/public-search",
-            params={"q": query},
-            timeout=config.HTTP_TIMEOUT,
-            headers={"User-Agent": config.USER_AGENT},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, dict):
-            return data.get("events", []) or data.get("data", []) or []
-        return data or []
+    def _wc_events(self) -> List[dict]:
+        """All open World Cup events (cached). Paginated: Gamma caps at 100/page."""
+        if self._wc_cache is not None:
+            return self._wc_cache
+        out: List[dict] = []
+        offset = 0
+        while True:
+            resp = self._session.get(
+                f"{self.base}/events",
+                params={
+                    "tag_slug": self._WC_TAG,
+                    "closed": "false",
+                    "limit": "100",
+                    "offset": str(offset),
+                },
+                timeout=config.HTTP_TIMEOUT,
+                headers={"User-Agent": config.USER_AGENT},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            batch = data if isinstance(data, list) else (data.get("data", []) or [])
+            if not batch:
+                break
+            out.extend(batch)
+            if len(batch) < 100:
+                break
+            offset += 100
+            if offset > 1000:  # safety bound; WC slate is ~530 events
+                break
+        self._wc_cache = out
+        return out
 
     def _candidate_events(self, team1: str, team2: str) -> List[dict]:
-        """Collect events whose title mentions BOTH teams (any alias form)."""
-        seen: Dict[str, dict] = {}
-        for q in (f"{team1} {team2}", team1, team2):
-            for ev in self._get_events(q):
-                ev_id = str(ev.get("id") or ev.get("slug") or id(ev))
-                seen.setdefault(ev_id, ev)
+        """WC events whose title mentions BOTH teams (any alias form)."""
         out = []
-        for ev in seen.values():
+        for ev in self._wc_events():
             title = ev.get("title") or ev.get("question") or ""
             if _title_mentions(title, team1) and _title_mentions(title, team2):
                 out.append(ev)
