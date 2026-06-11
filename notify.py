@@ -93,6 +93,24 @@ def _item_html(item: DigestItem) -> str:
     )
 
 
+def render_telegram(date: str, items: List[DigestItem]) -> str:
+    """Compact push: one line per game, just `team1 score–score team2`.
+
+    No odds, no xG, no disclaimer — that detail lives in the dashboard/email.
+    """
+    lines = [f"World Cup — {date}"]
+    for it in items:
+        m = it.match
+        if it.prediction is None:
+            lines.append(f"{m.team1} vs {m.team2} — no market")
+        else:
+            s = it.prediction.scoreline
+            lines.append(f"{m.team1} {s[0]}–{s[1]} {m.team2}")
+    if len(lines) == 1:
+        lines.append("no matches")
+    return "\n".join(lines)
+
+
 def render_digest(date: str, items: List[DigestItem]) -> tuple[str, str, str]:
     """Return (subject, text_body, html_body) for the day's digest."""
     subject = f"World Cup picks — {date} ({len(items)} match{'es' if len(items) != 1 else ''})"

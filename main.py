@@ -20,7 +20,7 @@ from typing import List, Optional
 
 import config
 import core
-from notify import render_digest, send_email, send_telegram
+from notify import render_digest, render_telegram, send_email, send_telegram
 from schedule_source import OpenFootballSource
 from store import ScoreReport, append_predictions, record_from, score_day
 
@@ -74,7 +74,7 @@ def run_digest(date: str, dry_run: bool, debug: bool) -> int:
         return 0
 
     sent_email = _push_email(subject, text_body, html_body)
-    _push_telegram(text_body)
+    _push_telegram(render_telegram(date, items))
 
     tg = config.load_telegram_config()
     if not sent_email and not tg.configured:
