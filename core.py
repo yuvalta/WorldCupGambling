@@ -50,7 +50,8 @@ def build_items(
             )
         try:
             prediction = build_prediction(
-                m.team1, m.team2, snap.p1, snap.draw, snap.p2, totals=totals
+                m.team1, m.team2, snap.p1, snap.draw, snap.p2, totals=totals,
+                exact_scores=snap.exact_scores or None,
             )
         except Exception as exc:
             items.append(DigestItem(match=m, prediction=None, note=f"model failed: {exc}"))

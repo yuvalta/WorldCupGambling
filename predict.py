@@ -51,9 +51,12 @@ class Prediction:
     lambda2: float
     scoreline: Tuple[int, int]
     totals: Optional[Totals] = None
-    # Top alternative scorelines (score -> joint prob), for transparency.
+    # Top alternative scorelines (score -> prob), for transparency.
     top_scores: List[Tuple[Tuple[int, int], float]] = field(default_factory=list)
     fit_error: float = 0.0
+    # "market" when the scoreline comes from Polymarket's Exact Score market,
+    # "model" when it's the fitted-Poisson fallback. Display honestly.
+    scoreline_source: str = "model"
 
 
 def devig_three_way(p1: float, draw: float, p2: float) -> ThreeWay:
@@ -139,8 +142,7 @@ def _fit_lambdas(
     return best
 
 
-def _most_likely_scoreline(lam1: float, lam2: float, max_goals: int, top_n: int = 5):
-    """Joint argmax over the scoreline grid (independent Poissons)."""
+def _all_scores(lam1: float, lam2: float, max_goals: int) -> List[Tuple[Tuple[int, int], float]]:
     v1 = _pmf_vector(lam1, max_goals)
     v2 = _pmf_vector(lam2, max_goals)
     scores: List[Tuple[Tuple[int, int], float]] = []
@@ -148,7 +150,33 @@ def _most_likely_scoreline(lam1: float, lam2: float, max_goals: int, top_n: int 
         for j, b in enumerate(v2):
             scores.append(((i, j), a * b))
     scores.sort(key=lambda kv: kv[1], reverse=True)
-    return scores[0][0], scores[:top_n]
+    return scores
+
+
+def _most_likely_scoreline(lam1: float, lam2: float, max_goals: int,
+                            outcome: str, top_n: int = 5):
+    """Most-likely scoreline CONSISTENT with the predicted match outcome.
+
+    The raw joint argmax of two independent Poissons is (mode lam1, mode lam2)
+    — almost always 0-0/1-0/0-1, and it structurally hides draws (draw mass is
+    spread across 0-0,1-1,2-2 so no single tie ever wins outright). That makes
+    the headline outcome and the displayed score disagree ("team1 favoured" but
+    score 0-1) and ties practically never appear.
+
+    Instead, condition on the modal outcome ("1"=team1 win, "X"=draw, "2"=team2
+    win) and return the most-likely score within that class. The score then
+    always matches the predicted winner, and draws surface when draw is modal.
+    """
+    scores = _all_scores(lam1, lam2, max_goals)
+
+    def in_class(i: int, j: int) -> bool:
+        return (outcome == "1" and i > j) or (outcome == "X" and i == j) or (
+            outcome == "2" and i < j)
+
+    for (i, j), p in scores:
+        if in_class(i, j):
+            return (i, j), scores[:top_n]
+    return scores[0][0], scores[:top_n]  # fallback (shouldn't happen)
 
 
 def build_prediction(
@@ -158,14 +186,29 @@ def build_prediction(
     draw: float,
     p2: float,
     totals: Optional[Totals] = None,
+    exact_scores: Optional[List[Tuple[Tuple[int, int], float]]] = None,
     max_goals: int = config.MAX_GOALS,
     lam_max: float = config.LAMBDA_MAX,
     lam_step: float = config.LAMBDA_STEP,
 ) -> Prediction:
-    """Build a Prediction from raw (vigged) market probabilities."""
+    """Build a Prediction from raw (vigged) market probabilities.
+
+    If `exact_scores` (crowd-implied scoreline probabilities from Polymarket's
+    Exact Score market) is supplied, the headline scoreline is read straight
+    from that market — real data beats our model. The Poisson is still fitted
+    (for lambdas/totals) and serves as the fallback when no exact-score market
+    exists.
+    """
     tw = devig_three_way(p1, draw, p2)
     lam1, lam2, err = _fit_lambdas(tw, totals, max_goals, lam_max, lam_step)
-    scoreline, top = _most_likely_scoreline(lam1, lam2, max_goals)
+    if exact_scores:
+        scoreline = exact_scores[0][0]
+        top = list(exact_scores[:5])
+        source = "market"
+    else:
+        outcome = max((("1", tw.p1), ("X", tw.draw), ("2", tw.p2)), key=lambda kv: kv[1])[0]
+        scoreline, top = _most_likely_scoreline(lam1, lam2, max_goals, outcome)
+        source = "model"
     return Prediction(
         team1=team1,
         team2=team2,
@@ -176,4 +219,5 @@ def build_prediction(
         totals=totals,
         top_scores=top,
         fit_error=err,
+        scoreline_source=source,
     )

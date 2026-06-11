@@ -63,6 +63,11 @@ class MarketSnapshot:
     event_id: str = ""
     clob_token_ids: List[str] = field(default_factory=list)
     layout: str = ""  # "three_way" | "split" — which branch produced this
+    # Crowd-implied EXACT scorelines from Polymarket's "Exact Score" market,
+    # as [((team1_goals, team2_goals), prob), ...] sorted high→low. Empty when
+    # the market isn't offered. This is real data — preferred over the model's
+    # Poisson scoreline when present.
+    exact_scores: List[Tuple[Tuple[int, int], float]] = field(default_factory=list)
 
 
 def _jload(value):
@@ -105,6 +110,9 @@ def _title_mentions(title: str, team: str) -> bool:
 # Over/under question phrasing varies. Pull the first decimal/half line we see.
 # Tighten to the real phrasing once confirmed live (handoff next-steps #3).
 _LINE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:goals?|total)?", re.IGNORECASE)
+
+# "Exact Score: Brazil 1 - 0 Morocco?" → captures the two goal counts.
+_SCORE_RE = re.compile(r"(\d+)\s*[-–]\s*(\d+)")
 
 
 def _extract_line(question: str) -> Optional[float]:
@@ -276,26 +284,81 @@ class PolymarketClient:
             layout="split",
         )
 
-    def _attach_totals(self, event: dict, snap: MarketSnapshot) -> None:
-        """Look for an over/under goals market within the same event."""
-        for market in event.get("markets", []) or []:
-            if not _market_is_live(market):
-                continue
-            q = (market.get("question") or "").lower()
-            if "over" not in q and "under" not in q and "total" not in q:
-                continue
-            prices = _outcome_prices(market)
-            if not prices:
-                continue
-            over = prices.get("over") or prices.get("yes")
-            under = prices.get("under") or prices.get("no")
-            line = _extract_line(market.get("question") or "")
-            if over is None or line is None:
-                continue
+    def _attach_totals(self, events: List[dict], snap: MarketSnapshot) -> None:
+        """Attach the full-match over/under goals line (prefers 2.5).
+
+        The O/U markets live in a sibling "<T1> vs <T2> - More Markets" event,
+        not the moneyline event, and are phrased "<T1> vs <T2>: O/U 2.5" with
+        Over/Under outcomes. Scan ALL candidate events; skip half-time and
+        team-specific O/U variants (their text after the colon names a team or
+        a half rather than starting with the line)."""
+        best: Optional[Tuple[float, float, float, Optional[float]]] = None
+        for event in events:
+            for market in event.get("markets", []) or []:
+                if not _market_is_live(market):
+                    continue
+                q = (market.get("question") or "")
+                ql = q.lower()
+                if "half" in ql:
+                    continue
+                tail = ql.split(":")[-1].strip()
+                if not (tail.startswith("o/u") or tail.startswith("over")):
+                    continue
+                prices = _outcome_prices(market)
+                if not prices:
+                    continue
+                over = prices.get("over") or prices.get("yes")
+                under = prices.get("under") or prices.get("no")
+                line = _extract_line(q)
+                if over is None or line is None:
+                    continue
+                closeness = abs(line - 2.5)  # 2.5 is the most informative line
+                if best is None or closeness < best[0]:
+                    best = (closeness, line, over, under)
+        if best is not None:
+            _, line, over, under = best
             snap.line = line
             snap.p_over = over
             snap.p_under = under if under is not None else max(0.0, 1.0 - over)
-            return
+
+    def _attach_exact_scores(self, events: List[dict], snap: MarketSnapshot) -> None:
+        """Read crowd-implied exact scorelines from the "- Exact Score" event.
+
+        Markets are "Exact Score: <NameA> i - j <NameB>?" with Yes/No outcomes;
+        the Yes price is P(that exact score). Orient (i, j) to (team1, team2) by
+        which name precedes the score, so it's correct even if Polymarket lists
+        the teams in the opposite order to the schedule. "Any Other Score" (the
+        tail bucket) is skipped."""
+        for event in events:
+            if "exact score" not in (event.get("title") or "").lower():
+                continue
+            scores: Dict[Tuple[int, int], float] = {}
+            for market in event.get("markets", []) or []:
+                if not _market_is_live(market):
+                    continue
+                q = market.get("question") or ""
+                if "any other" in q.lower():
+                    continue
+                m = _SCORE_RE.search(q)
+                if not m:
+                    continue
+                prices = _outcome_prices(market)
+                yes = prices.get("yes") if prices else None
+                if yes is None:
+                    continue
+                a, b = int(m.group(1)), int(m.group(2))
+                before = _norm(q[: m.start()])
+                # If the name before the score is team2 (not team1), flip.
+                if (any(f in before for f in _name_forms(snap.team2))
+                        and not any(f in before for f in _name_forms(snap.team1))):
+                    a, b = b, a
+                key = (a, b)
+                scores[key] = max(yes, scores.get(key, 0.0))
+            if scores:
+                snap.exact_scores = sorted(
+                    scores.items(), key=lambda kv: kv[1], reverse=True
+                )
+                return
 
     # --- public API --------------------------------------------------------
 
@@ -319,11 +382,16 @@ class PolymarketClient:
                 if debug:
                     print(f"  [debug]   rejected '{title}': no usable moneyline market")
                 continue
-            self._attach_totals(ev, snap)
+            # Totals and exact scores live in sibling events — scan all candidates.
+            self._attach_totals(events, snap)
+            self._attach_exact_scores(events, snap)
             if debug:
+                top = snap.exact_scores[0] if snap.exact_scores else None
                 print(
                     f"  [debug]   matched '{title}' via {snap.layout} "
-                    f"(p1={snap.p1:.2f} draw={snap.draw:.2f} p2={snap.p2:.2f})"
+                    f"(p1={snap.p1:.2f} draw={snap.draw:.2f} p2={snap.p2:.2f}) "
+                    f"totals={'%.1f' % snap.line if snap.line else 'N'} "
+                    f"exact_top={top[0] if top else 'N'}"
                 )
             return snap
         return None

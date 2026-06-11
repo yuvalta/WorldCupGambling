@@ -37,6 +37,52 @@ class StubMarket:
         return self._map.get((team1, team2))
 
 
+class TestExactScores(unittest.TestCase):
+    """Polymarket 'Exact Score' market parsing + (team1, team2) orientation."""
+
+    def _exact_event(self, name_a, name_b):
+        def mkt(q, yes):
+            return {
+                "question": q,
+                "outcomes": '["Yes", "No"]',
+                "outcomePrices": f'["{yes}", "{1 - yes:.3f}"]',
+                "closed": False,
+                "acceptingOrders": True,
+            }
+        return {
+            "title": f"{name_a} vs. {name_b} - Exact Score",
+            "markets": [
+                mkt(f"Exact Score: {name_a} 2 - 0 {name_b}?", 0.20),
+                mkt(f"Exact Score: {name_a} 1 - 1 {name_b}?", 0.15),
+                mkt(f"Exact Score: {name_a} 0 - 1 {name_b}?", 0.05),
+                mkt("Exact Score: Any Other Score?", 0.30),  # skipped
+            ],
+        }
+
+    def test_parses_and_sorts(self):
+        import polymarket as pm
+        snap = pm.MarketSnapshot("Brazil", "Morocco", 0.6, 0.2, 0.2)
+        pm.PolymarketClient()._attach_exact_scores(
+            [self._exact_event("Brazil", "Morocco")], snap)
+        self.assertEqual(snap.exact_scores[0], ((2, 0), 0.20))
+        self.assertNotIn((2, 0), [s for s, _ in snap.exact_scores if s == (0, 0)])
+
+    def test_orientation_flips_when_polymarket_lists_teams_reversed(self):
+        # Schedule says team1=Morocco, but Polymarket titles "Brazil vs Morocco".
+        import polymarket as pm
+        snap = pm.MarketSnapshot("Morocco", "Brazil", 0.4, 0.25, 0.35)
+        pm.PolymarketClient()._attach_exact_scores(
+            [self._exact_event("Brazil", "Morocco")], snap)
+        # "Brazil 2 - 0 Morocco" must become 0-2 from Morocco's perspective.
+        self.assertEqual(snap.exact_scores[0], ((0, 2), 0.20))
+
+    def test_build_prediction_prefers_market_scoreline(self):
+        p = predict.build_prediction(
+            "A", "B", 0.6, 0.2, 0.2, exact_scores=[((2, 1), 0.3), ((1, 1), 0.2)])
+        self.assertEqual(p.scoreline, (2, 1))
+        self.assertEqual(p.scoreline_source, "market")
+
+
 class TestPoisson(unittest.TestCase):
     def test_favourite_does_not_lose(self):
         p = predict.build_prediction("A", "B", 0.65, 0.22, 0.13)
