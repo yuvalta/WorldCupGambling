@@ -201,12 +201,23 @@ def build_prediction(
     """
     tw = devig_three_way(p1, draw, p2)
     lam1, lam2, err = _fit_lambdas(tw, totals, max_goals, lam_max, lam_step)
+    outcome = max((("1", tw.p1), ("X", tw.draw), ("2", tw.p2)), key=lambda kv: kv[1])[0]
     if exact_scores:
-        scoreline = exact_scores[0][0]
+        # Reconcile against the (liquid, trustworthy) moneyline: pick the most
+        # likely exact score CONSISTENT with the favoured outcome, ignoring the
+        # noise in thin exact-score markets (e.g. a 20% underdog 0-1 when the
+        # moneyline gives them 3%). Fall back to the raw top score if somehow
+        # no consistent score exists.
+        def consistent(sc: Tuple[int, int]) -> bool:
+            i, j = sc
+            return (outcome == "1" and i > j) or (outcome == "X" and i == j) or (
+                outcome == "2" and i < j)
+
+        scoreline = next((sc for sc, _ in exact_scores if consistent(sc)),
+                         exact_scores[0][0])
         top = list(exact_scores[:5])
         source = "market"
     else:
-        outcome = max((("1", tw.p1), ("X", tw.draw), ("2", tw.p2)), key=lambda kv: kv[1])[0]
         scoreline, top = _most_likely_scoreline(lam1, lam2, max_goals, outcome)
         source = "model"
     return Prediction(

@@ -82,6 +82,15 @@ class TestExactScores(unittest.TestCase):
         self.assertEqual(p.scoreline, (2, 1))
         self.assertEqual(p.scoreline_source, "market")
 
+    def test_reconciles_thin_exact_score_against_favourite(self):
+        # A heavy favourite (team1, 90%) but a noisy exact-score market whose top
+        # entry is the underdog winning 0-1. Reconciliation must skip it and pick
+        # the top score where the favourite wins (1-0).
+        p = predict.build_prediction(
+            "A", "B", 0.90, 0.07, 0.03,
+            exact_scores=[((0, 1), 0.21), ((1, 0), 0.20), ((2, 1), 0.19)])
+        self.assertEqual(p.scoreline, (1, 0))
+
 
 class TestPoisson(unittest.TestCase):
     def test_favourite_does_not_lose(self):
